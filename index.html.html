@@ -1,0 +1,1103 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>鋸片維修項目管理</title>
+    <!-- 載入 Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'Noto Sans TC', 'sans-serif'],
+                    },
+                    colors: {
+                        primary: '#059669', /* 綠色系，代表維護與進度 */
+                        secondary: '#34d399',
+                        warning: '#f97316',
+                        info: '#3b82f6',
+                        success: '#10b981',
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        body {
+            background-color: #f0fdf4; /* 淺綠色背景 */
+            min-height: 100vh;
+        }
+        .container-content {
+            max-width: 1500px;
+        }
+        .status-pill {
+            padding: 2px 8px;
+            border-radius: 9999px;
+            font-size: 0.75rem;
+            font-weight: 600;
+        }
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.5);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 100;
+            opacity: 0;
+            visibility: hidden;
+            transition: opacity 0.3s ease, visibility 0.3s ease;
+        }
+        .modal-overlay.open {
+            opacity: 1;
+            visibility: visible;
+        }
+        .modal-content {
+            background: white;
+            padding: 30px;
+            border-radius: 12px;
+            width: 90%;
+            max-width: 500px;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
+            transform: scale(0.95);
+            transition: transform 0.3s ease;
+        }
+        .modal-overlay.open .modal-content {
+            transform: scale(1);
+        }
+
+        /* 進度條樣式 */
+        .progress-step {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            text-align: center;
+            position: relative;
+            flex-grow: 1;
+            padding: 0 5px;
+        }
+        .step-indicator {
+            width: 30px;
+            height: 30px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            color: white;
+            z-index: 10;
+            transition: background-color 0.3s, border-color 0.3s;
+            margin-bottom: 8px;
+        }
+        .step-done .step-indicator {
+            background-color: '#10b981'; /* success */
+        }
+        .step-current .step-indicator {
+            background-color: '#3b82f6'; /* info */
+            box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.3);
+        }
+        .step-pending .step-indicator {
+            background-color: '#e5e7eb'; /* gray-200 */
+            color: '#9ca3af'; /* gray-400 */
+        }
+        .step-done .step-label, .step-current .step-label {
+            color: '#1f2937'; /* gray-800 */
+            font-weight: 600;
+        }
+        
+    </style>
+</head>
+<body class="font-sans">
+    <div class="container-content mx-auto p-4 sm:p-6 lg:p-8">
+        <header class="mb-8">
+            <h1 class="text-4xl font-extrabold text-primary mb-2 text-center">鋸片維修項目管理</h1>
+            <p class="text-gray-600 text-center">記錄客戶送修的每一片鋸片。包含規格、客戶編號和系統 ID。</p>
+        </header>
+        
+        <!-- 權限模式切換 -->
+        <div class="flex justify-center mb-6">
+            <div class="inline-flex rounded-md shadow-sm">
+                <button id="mode-internal" class="px-4 py-2 text-sm font-medium rounded-l-lg transition duration-150 border border-primary/50 bg-primary text-white">
+                    公司內部視圖 (管理)
+                </button>
+                <button id="mode-customer" class="px-4 py-2 text-sm font-medium rounded-r-lg transition duration-150 border border-primary/50 bg-white text-primary hover:bg-green-50">
+                    客戶查詢視圖
+                </button>
+            </div>
+        </div>
+
+        <!-- 客戶查詢介面 (僅在客戶模式顯示) -->
+        <section id="customer-search-section" class="bg-white p-6 rounded-xl shadow-2xl mb-8 border border-info/30 hidden">
+            <h2 class="text-2xl font-bold mb-4 text-info">客戶維修進度查詢</h2>
+            <p class="text-gray-600 mb-4">請輸入您的維修編號或客戶名稱和報價日期進行查詢。</p>
+            
+            <!-- 查詢輸入區 -->
+            <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
+                <input type="text" id="customer-serial-search" placeholder="輸入維修編號 (優先查詢)"
+                       class="col-span-1 md:col-span-2 p-3 border border-gray-300 rounded-lg focus:ring-info focus:border-info transition duration-150">
+                <input type="text" id="customer-name-search" placeholder="客戶名稱"
+                       class="col-span-1 p-3 border border-gray-300 rounded-lg focus:ring-info focus:border-info transition duration-150">
+                <input type="date" id="customer-date-search" placeholder="報價日期"
+                       class="col-span-1 p-3 border border-gray-300 rounded-lg focus:ring-info focus:border-info transition duration-150">
+            </div>
+            
+            <button id="run-customer-search" class="bg-info text-white py-3 px-6 rounded-lg font-bold hover:bg-blue-700 transition duration-300 shadow-lg w-full md:w-auto">
+                查詢我的鋸片進度
+            </button>
+            
+            <p id="customer-search-message" class="mt-4 text-sm"></p>
+
+            <!-- 客戶查詢結果優化介面 -->
+            <div id="customer-result-container" class="mt-8 pt-6 border-t border-gray-200 hidden">
+                <div class="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 border-b pb-4">
+                    <h3 class="text-3xl font-extrabold text-gray-800 mb-2 md:mb-0">
+                        維修單號: <span id="customer-result-serial" class="text-primary"></span>
+                    </h3>
+                    <div class="text-lg font-semibold text-gray-600">
+                         客戶: <span id="customer-result-name" class="text-info"></span>
+                    </div>
+                </div>
+
+                <!-- 視覺化進度條 -->
+                <h4 class="text-xl font-bold mb-4 text-gray-700">⚙️ 維修流程進度</h4>
+                <div class="relative pt-1 mb-8">
+                    <div class="overflow-hidden mb-4 text-xs flex rounded-full h-2 bg-gray-200">
+                        <div id="progress-bar-fill" class="shadow-none flex flex-col text-center whitespace-nowrap text-white justify-center bg-success transition-all duration-700 ease-in-out" style="width: 0%"></div>
+                    </div>
+                    <div id="customer-progress-display" class="flex justify-between items-start overflow-x-auto pb-2">
+                        <!-- 進度步驟將由 JS 渲染 -->
+                    </div>
+                </div>
+
+                <!-- 照片與特殊需求 -->
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mt-8">
+                    <div id="customer-photo-display" class="md:col-span-2 space-y-4">
+                        <h4 class="text-xl font-bold text-gray-700">📸 紀錄照片</h4>
+                        <div id="photo-before-container"></div>
+                        <div id="photo-after-container"></div>
+                        <p id="photo-pending-message" class="text-gray-500 italic text-sm"></p>
+                    </div>
+
+                    <div class="md:col-span-1 bg-yellow-50 p-4 rounded-xl border border-warning/30">
+                        <h4 class="text-xl font-bold text-warning mb-3">🛠️ 特殊維修項目</h4>
+                        <div id="conditional-display" class="space-y-2">
+                            <p id="toothing-status" class="text-sm text-gray-700">補齒: <span class="font-semibold">N/A</span></p>
+                            <p id="correction-status" class="text-sm text-gray-700">鋼板校正: <span class="font-semibold">N/A</span></p>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+        </section>
+
+
+        <!-- 新增維修項目區塊 (僅在內部模式顯示) - 保持不變 -->
+        <section id="add-item" class="bg-white p-6 rounded-xl shadow-lg mb-8 border border-primary/30">
+            <h2 class="text-2xl font-semibold mb-4 text-gray-800">新增維修項目 (鋸片規格與客戶資訊)</h2>
+            <div id="auth-status" class="text-sm mb-4">正在初始化...</div>
+
+            <form id="item-form" class="grid grid-cols-2 md:grid-cols-6 gap-4 items-end">
+                <!-- 客戶名稱 -->
+                <div class="col-span-2 md:col-span-2">
+                    <label for="customer-name" class="block text-sm font-medium text-gray-700 mb-1">客戶名稱</label>
+                    <input type="text" id="customer-name" required placeholder="請輸入客戶名稱"
+                           class="w-full p-2 border border-gray-300 rounded-lg focus:ring-primary focus:border-primary transition duration-150">
+                </div>
+                <!-- 客戶提供編號 -->
+                <div class="col-span-2 md:col-span-2">
+                    <label for="serial-number" class="block text-sm font-medium text-gray-700 mb-1">編號 (客戶提供)</label>
+                    <input type="text" id="serial-number" required placeholder="請輸入鋸片唯一編號"
+                           class="w-full p-2 border border-gray-300 rounded-lg focus:ring-primary focus:border-primary transition duration-150">
+                </div>
+                
+                <!-- 報價日期 -->
+                <div class="col-span-2 md:col-span-2">
+                    <label for="quote-date" class="block text-sm font-medium text-gray-700 mb-1">報價日期</label>
+                    <input type="date" id="quote-date" required
+                           class="w-full p-2 border border-gray-300 rounded-lg focus:ring-primary focus:border-primary transition duration-150">
+                </div>
+
+                <!-- 外徑 (D) -->
+                <div class="col-span-1">
+                    <label for="outer-diameter" class="block text-sm font-medium text-gray-700 mb-1">外徑 (D)</label>
+                    <input type="text" id="outer-diameter" required placeholder="例如：305mm"
+                           class="w-full p-2 border border-gray-300 rounded-lg focus:ring-primary focus:border-primary transition duration-150">
+                </div>
+                 <!-- 內孔 (d) -->
+                <div class="col-span-1">
+                    <label for="inner-bore" class="block text-sm font-medium text-gray-700 mb-1">內孔 (d)</label>
+                    <input type="text" id="inner-bore" required placeholder="例如：25.4mm"
+                           class="w-full p-2 border border-gray-300 rounded-lg focus:ring-primary focus:border-primary transition duration-150">
+                </div>
+                <!-- 厚度 (B) -->
+                <div class="col-span-1">
+                    <label for="thickness" class="block text-sm font-medium text-gray-700 mb-1">厚度 (B)</label>
+                    <input type="text" id="thickness" required placeholder="例如：2.8mm"
+                           class="w-full p-2 border border-gray-300 rounded-lg focus:ring-primary focus:border-primary transition duration-150">
+                </div>
+                <!-- 齒數 (Z) -->
+                <div class="col-span-1">
+                    <label for="teeth-count" class="block text-sm font-medium text-gray-700 mb-1">齒數 (Z)</label>
+                    <input type="text" id="teeth-count" required placeholder="例如：40T"
+                           class="w-full p-2 border border-gray-300 rounded-lg focus:ring-primary focus:border-primary transition duration-150">
+                </div>
+                
+                <!-- 功能/材質 -->
+                <div class="col-span-2">
+                    <label for="function-type" class="block text-sm font-medium text-gray-700 mb-1">功能/材質</label>
+                    <select id="function-type" required class="w-full p-2 border border-gray-300 rounded-lg focus:ring-primary focus:border-primary transition duration-150 bg-white">
+                        <option value="">請選擇用途</option>
+                        <option value="木工">木工</option>
+                        <option value="鐵工">鐵工</option>
+                        <option value="鋁用">鋁用</option>
+                        <option value="塑膠">塑膠</option>
+                        <option value="HSS">HSS</option>
+                        <option value="刀具">刀具 (特殊)</option>
+                    </select>
+                </div>
+                
+                <!-- 備註/說明 -->
+                <div class="col-span-6 md:col-span-4">
+                    <label for="notes" class="block text-sm font-medium text-gray-700 mb-1">初始備註/客戶問題</label>
+                    <textarea id="notes" rows="1" placeholder="例如：客戶反應切削不順"
+                           class="w-full p-2 border border-gray-300 rounded-lg focus:ring-primary focus:border-primary transition duration-150"></textarea>
+                </div>
+
+                <!-- 按鈕 -->
+                <div class="col-span-6 md:col-span-2">
+                    <button type="submit" id="submit-button" disabled
+                            class="w-full bg-primary text-white py-3 px-4 rounded-lg font-bold hover:bg-green-700 transition duration-300 shadow-md disabled:bg-gray-400">
+                        新增維修項目
+                    </button>
+                </div>
+            </form>
+            <p id="form-message" class="mt-3 text-sm"></p>
+        </section>
+
+        <!-- 項目清單與查詢區塊 (僅在內部模式顯示) - 保持不變 -->
+        <section id="item-list-section" class="bg-white p-6 rounded-xl shadow-lg border border-primary/30">
+            <h2 class="text-2xl font-semibold mb-4 text-gray-800">維修項目清單 (共 <span id="item-count">0</span> 筆)</h2>
+
+            <!-- 查詢輸入框 -->
+            <div class="mb-6">
+                <label for="search-input" class="block text-sm font-medium text-gray-700 mb-1">
+                    公司內部查詢 (編號、名稱、規格)
+                </label>
+                <input type="text" id="search-input" placeholder="可輸入客戶編號、客戶名稱或規格進行篩選"
+                       class="w-full p-3 border border-gray-300 rounded-lg focus:ring-primary focus:border-primary transition duration-150">
+            </div>
+
+            <!-- 項目表格 (響應式設計) -->
+            <div class="overflow-x-auto">
+                <table class="min-w-full divide-y divide-gray-200">
+                    <thead class="bg-green-50">
+                        <tr>
+                            <th class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[100px]">客戶名稱</th>
+                            <th class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[100px]">編號 (客戶提供)</th>
+                            <th class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[80px]">報價日期</th>
+                            <th class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[80px]">規格 (D/d/B/Z)</th>
+                            <th class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[100px]">功能</th>
+                            <th class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-[120px]">目前進度</th>
+                            <th class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-[180px]">操作/ID</th>
+                        </tr>
+                    </thead>
+                    <tbody id="items-table-body" class="bg-white divide-y divide-gray-200">
+                        <tr>
+                            <td colspan="7" class="px-6 py-4 whitespace-nowrap text-sm text-gray-500 text-center">
+                                載入中...
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <div id="no-results" class="hidden text-center py-4 text-gray-500 mt-4">
+                找不到符合條件的維修項目記錄。
+            </div>
+        </section>
+    </div>
+    
+    <!-- 模態框: 進度更新/詳細資訊 (已更新照片上傳區塊) -->
+    <div id="progress-modal-overlay" class="modal-overlay">
+        <div class="modal-content">
+            <h3 class="text-2xl font-bold mb-4 text-primary">維修單進度與詳細資料</h3>
+            <p class="text-sm text-gray-600 mb-4">維修項目: <span id="modal-item-info" class="font-semibold text-gray-800"></span></p>
+
+            <form id="progress-form">
+                <input type="hidden" id="modal-item-id">
+                
+                <!-- 維修單狀態選擇 -->
+                <div class="mb-4">
+                    <label for="modal-status-select" class="block text-sm font-medium text-gray-700 mb-1">流程狀態</label>
+                    <select id="modal-status-select" class="w-full p-2 border border-gray-300 rounded-lg bg-white"></select>
+                </div>
+                
+                <!-- 條件式狀態 -->
+                <div id="conditional-statuses" class="mb-4 space-y-2 p-3 border rounded-lg bg-gray-50">
+                    <h4 class="text-sm font-semibold text-gray-700">條件式維修項目 (依需求勾選):</h4>
+                    <label class="flex items-center text-sm text-gray-700">
+                        <input type="checkbox" id="modal-toothing" class="form-checkbox h-4 w-4 text-primary rounded border-gray-300">
+                        <span class="ml-2">補齒 (若有斷齒)</span>
+                    </label>
+                    <label class="flex items-center text-sm text-gray-700">
+                        <input type="checkbox" id="modal-plate-correction" class="form-checkbox h-4 w-4 text-primary rounded border-gray-300">
+                        <span class="ml-2">鋼板校正 (若有反板)</span>
+                    </label>
+                </div>
+
+                <!-- 照片管理 (直接上傳 Base64) -->
+                <div class="mb-4 p-3 border rounded-lg bg-yellow-50/50">
+                    <h4 class="text-sm font-semibold text-gray-700 mb-2">📸 照片管理 (直接上傳，自動轉換為 Base64 儲存)</h4>
+                    
+                    <!-- 維修前照片 -->
+                    <div class="mb-4">
+                        <label for="modal-file-before" class="block text-xs font-medium text-gray-700 mb-1">維修前照片上傳 (點擊選取檔案)</label>
+                        <input type="file" id="modal-file-before" accept="image/*" class="w-full p-2 mb-2 text-sm border rounded-lg bg-white">
+                        <input type="hidden" id="modal-base64-before"> <!-- 儲存 Base64 資料 -->
+                        <div id="modal-preview-before" class="mt-2 h-20 w-auto max-w-full overflow-hidden rounded-lg border border-dashed border-gray-300 flex justify-center items-center">
+                            <span class="text-xs text-gray-400">維修前預覽圖</span>
+                        </div>
+                    </div>
+                    
+                    <!-- 出貨後照片 -->
+                    <div>
+                        <label for="modal-file-after" class="block text-xs font-medium text-gray-700 mb-1">出貨前照片上傳 (點擊選取檔案)</label>
+                        <input type="file" id="modal-file-after" accept="image/*" class="w-full p-2 mb-2 text-sm border rounded-lg bg-white">
+                        <input type="hidden" id="modal-base64-after"> <!-- 儲存 Base64 資料 -->
+                        <div id="modal-preview-after" class="mt-2 h-20 w-auto max-w-full overflow-hidden rounded-lg border border-dashed border-gray-300 flex justify-center items-center">
+                            <span class="text-xs text-gray-400">出貨前預覽圖</span>
+                        </div>
+                    </div>
+                    
+                    <p class="text-xs text-red-500 mt-1">注意：Base64 圖片會增加資料庫文件大小，請盡量使用壓縮過的小尺寸圖片。</p>
+                </div>
+
+                <!-- 備註 -->
+                <div class="mb-6">
+                    <label for="modal-notes" class="block text-sm font-medium text-gray-700 mb-1">備註/處理說明</label>
+                    <textarea id="modal-notes" rows="3" class="w-full p-2 border border-gray-300 rounded-lg focus:ring-primary focus:border-primary"></textarea>
+                </div>
+
+                <div class="flex justify-end space-x-3">
+                    <button type="button" id="modal-close-button" class="bg-gray-300 text-gray-800 py-2 px-4 rounded-lg font-bold hover:bg-gray-400 transition duration-300">
+                        取消
+                    </button>
+                    <button type="submit" class="bg-info text-white py-2 px-4 rounded-lg font-bold hover:bg-info/90 transition duration-300">
+                        更新進度與備註
+                    </button>
+                </div>
+                <p id="modal-message" class="mt-3 text-sm"></p>
+            </form>
+        </div>
+    </div>
+
+
+    <!-- Firebase 腳本 -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, addDoc, updateDoc, deleteDoc, collection, query, onSnapshot, serverTimestamp, setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // 設定 Firebase Debug Log
+        setLogLevel('Debug');
+
+        // --- 全域變數初始化 ---
+        // 1. App ID：用於 Firestore 路徑，自定義即可
+        const appId = 'saw-blade-management'; 
+
+        // 2. Firebase 設定：當您在本機或 NAS 執行時，Canvas 的全域變數會遺失。
+        // !!! 請將下方的 YOUR_... 替換成您在 Firebase Console 取得的真實設定 !!!
+        const MY_FIREBASE_CONFIG = {
+            apiKey: "YOUR_API_KEY_HERE", 
+            authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
+            projectId: "YOUR_PROJECT_ID",
+            storageBucket: "YOUR_PROJECT_ID.appspot.com",
+            messagingSenderId: "YOUR_MESSAGING_SENDER_ID",
+            appId: "YOUR_WEB_APP_ID"
+        };
+
+        // 檢查 Canvas 環境變數。如果找不到（在本機或 NAS 運行），則使用我們硬編碼的配置。
+        const firebaseConfig = typeof __firebase_config !== 'undefined' 
+            ? JSON.parse(__firebase_config) 
+            : MY_FIREBASE_CONFIG; 
+            
+        // 在非 Canvas 環境中，初始化 Token 設為 null
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null; 
+
+        let app, db, auth, userId = null;
+        let isAuthReady = false;
+        const COLLECTION_NAME = 'saw_blade_repairs'; 
+
+        // 核心狀態列表
+        const STATUS_FLOW = [
+            '收到 (Received)', '顯微檢查 (Micro-Inspection)', '浸泡藥水 (Soaking)', 
+            '清潔 (Cleaning)', '研磨 (Grinding)', '上油 (Oiling)', '檢查 (Final Check)', 
+            '出貨 (Shipped)', '待取件 (Ready for Pickup)', '待寄貨 (Ready for Mail)'
+        ];
+        
+        // 將流程狀態分為 "維修中" 和 "完成/出貨" 兩個類別，用於視覺化進度條
+        const PROGRESS_STEPS = STATUS_FLOW.slice(0, 7).map(s => s.split(' (')[0]); // 只取維修中的前7步
+        const FINAL_STEPS = STATUS_FLOW.slice(7).map(s => s.split(' (')[0]); // 完成/出貨的後3步
+
+        // --- DOM 元素 ---
+        const authStatusEl = document.getElementById('auth-status');
+        const submitButton = document.getElementById('submit-button');
+        const itemForm = document.getElementById('item-form');
+        const itemsTableBody = document.getElementById('items-table-body');
+        const searchInput = document.getElementById('search-input');
+        const itemCountEl = document.getElementById('item-count');
+        const addItemSection = document.getElementById('add-item');
+        const itemListSection = document.getElementById('item-list-section');
+        
+        // 模式切換
+        const modeInternalBtn = document.getElementById('mode-internal');
+        const modeCustomerBtn = document.getElementById('mode-customer');
+        const customerSearchSection = document.getElementById('customer-search-section');
+
+        // 客戶查詢
+        const customerSerialSearch = document.getElementById('customer-serial-search');
+        const customerNameSearch = document.getElementById('customer-name-search');
+        const customerDateSearch = document.getElementById('customer-date-search');
+        const runCustomerSearchBtn = document.getElementById('run-customer-search');
+        const customerResultContainer = document.getElementById('customer-result-container');
+        const customerProgressDisplay = document.getElementById('customer-progress-display');
+        const progressBarFill = document.getElementById('progress-bar-fill');
+        const customerPhotoDisplay = document.getElementById('customer-photo-display');
+        const photoBeforeContainer = document.getElementById('photo-before-container');
+        const photoAfterContainer = document.getElementById('photo-after-container');
+        const photoPendingMessage = document.getElementById('photo-pending-message');
+        const conditionalDisplay = document.getElementById('conditional-display');
+        const customerSearchMessage = document.getElementById('customer-search-message');
+
+        // 模態框元素
+        const modalOverlay = document.getElementById('progress-modal-overlay');
+        const modalCloseBtn = document.getElementById('modal-close-button');
+        const progressForm = document.getElementById('progress-form');
+        const modalStatusSelect = document.getElementById('modal-status-select');
+        const modalItemId = document.getElementById('modal-item-id');
+        const modalItemInfo = document.getElementById('modal-item-info');
+        const modalToothing = document.getElementById('modal-toothing');
+        const modalPlateCorrection = document.getElementById('modal-plate-correction');
+        const modalNotes = document.getElementById('modal-notes');
+        const modalMessage = document.getElementById('modal-message');
+
+        // 新增/修改的照片上傳相關 DOM
+        const modalFileBefore = document.getElementById('modal-file-before');
+        const modalBase64Before = document.getElementById('modal-base64-before');
+        const modalPreviewBefore = document.getElementById('modal-preview-before');
+        const modalFileAfter = document.getElementById('modal-file-after');
+        const modalBase64After = document.getElementById('modal-base64-after');
+        const modalPreviewAfter = document.getElementById('modal-preview-after');
+
+
+        let allItems = []; // 儲存所有維修項目資料
+        let currentMode = 'internal'; // 'internal' or 'customer'
+
+        // 初始化狀態選項到模態框
+        STATUS_FLOW.forEach(status => {
+            const option = document.createElement('option');
+            option.value = status;
+            option.textContent = status.split(' (')[0]; // 只顯示中文部分
+            modalStatusSelect.appendChild(option);
+        });
+
+        // --- 輔助函數：圖片檔案轉 Base64 ---
+        function fileToBase64(fileInput, base64HiddenInput, previewElement) {
+            const file = fileInput.files[0];
+            if (!file) return;
+
+            // 確保檔案小於 1MB，避免 Firestore 文件過大
+            if (file.size > 1024 * 1024) { 
+                // 改用自定義通知代替 alert
+                showCustomMessage('圖片檔案過大，請選擇小於 1MB 的圖片以確保資料庫穩定。', 'error');
+                fileInput.value = '';
+                base64HiddenInput.value = '';
+                previewElement.innerHTML = '<span class="text-xs text-red-500">檔案過大</span>';
+                return;
+            }
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const base64String = e.target.result;
+                base64HiddenInput.value = base64String;
+                previewElement.innerHTML = `<img src="${base64String}" class="h-20 w-auto max-w-full object-contain">`;
+            };
+            reader.readAsDataURL(file);
+        }
+
+        // 綁定檔案選擇事件
+        modalFileBefore.addEventListener('change', () => fileToBase64(modalFileBefore, modalBase64Before, modalPreviewBefore));
+        modalFileAfter.addEventListener('change', () => fileToBase64(modalFileAfter, modalBase64After, modalPreviewAfter));
+
+        // 清除預覽和 Base64 值
+        function resetPhotoInputs() {
+            modalFileBefore.value = '';
+            modalBase64Before.value = '';
+            modalPreviewBefore.innerHTML = '<span class="text-xs text-gray-400">維修前預覽圖</span>';
+            
+            modalFileAfter.value = '';
+            modalBase64After.value = '';
+            modalPreviewAfter.innerHTML = '<span class="text-xs text-gray-400">出貨前預覽圖</span>';
+        }
+
+        function updatePreview(base64String, previewElement, defaultText) {
+            if (base64String) {
+                // 檢查是否為 Base64 (以 data:image 開頭)
+                const isBase64 = base64String.startsWith('data:image');
+                if (isBase64) {
+                    previewElement.innerHTML = `<img src="${base64String}" class="h-20 w-auto max-w-full object-contain">`;
+                } else {
+                    // 如果存的不是 Base64 而是舊的 URL 格式，則顯示連結字樣
+                    previewElement.innerHTML = `<span class="text-xs text-info">連結 (舊格式)</span>`;
+                }
+            } else {
+                previewElement.innerHTML = `<span class="text-xs text-gray-400">${defaultText}</span>`;
+            }
+        }
+        
+        // --- 輔助函數：資料庫路徑 ---
+        function getCollectionRef() {
+            if (!db || !userId) return null;
+            // 私有資料路徑: /artifacts/{appId}/users/{userId}/{collectionName}
+            return collection(db, 'artifacts', appId, 'users', userId, COLLECTION_NAME);
+        }
+
+        // --- 1. 初始化 Firebase 與認證 ---
+        async function initializeFirebase() {
+            try {
+                if (Object.keys(firebaseConfig).length === 0 || !firebaseConfig.projectId || firebaseConfig.projectId === "YOUR_PROJECT_ID") {
+                    authStatusEl.innerHTML = `
+                        <span class="text-red-600 font-bold">錯誤：Firebase 設定遺失或為預設佔位符！</span>
+                        <br>請在程式碼中修改 **MY_FIREBASE_CONFIG** 替換成您的真實專案設定。
+                    `;
+                    submitButton.disabled = true;
+                    return;
+                }
+                
+                app = initializeApp(firebaseConfig);
+                db = getFirestore(app);
+                auth = getAuth(app);
+
+                onAuthStateChanged(auth, async (user) => {
+                    if (user) {
+                        userId = user.uid;
+                        authStatusEl.innerHTML = `已登入 (用戶 ID: <span class="font-mono text-green-600">${userId}</span>)`;
+                        submitButton.disabled = false;
+                        isAuthReady = true;
+                        setupDataListener();
+                    } else {
+                        await handleSignIn();
+                    }
+                });
+            } catch (error) {
+                console.error("Firebase 初始化失敗:", error);
+                authStatusEl.textContent = `初始化錯誤: ${error.message}`;
+            }
+        }
+
+        async function handleSignIn() {
+            try {
+                if (initialAuthToken) {
+                    await signInWithCustomToken(auth, initialAuthToken);
+                } else {
+                    // 在非 Canvas 環境下，使用匿名登入
+                    await signInAnonymously(auth); 
+                }
+            } catch (error) {
+                console.error("登入失敗:", error);
+                authStatusEl.textContent = `登入失敗: ${error.message}`;
+            }
+        }
+        
+        // --- 2. 資料操作：新增維修項目 (保持不變) ---
+        async function addRepairItem(data) {
+            if (!isAuthReady || !getCollectionRef()) {
+                console.error("Firebase 尚未準備好或未登入");
+                document.getElementById('form-message').textContent = '錯誤：系統尚未連線到資料庫。';
+                document.getElementById('form-message').className = 'mt-3 text-sm text-red-500';
+                return false;
+            }
+
+            try {
+                await addDoc(getCollectionRef(), {
+                    ...data,
+                    status: STATUS_FLOW[0], // 預設為 '收到'
+                    isToothingRequired: false,
+                    isPlateCorrectionRequired: false,
+                    notes: data.notes || '',
+                    photos: { before: '', after: '' }, // 初始為空字串
+                    timestamp: serverTimestamp()
+                });
+                
+                // 清空表單 (除了報價日期，保持用戶習慣)
+                document.getElementById('serial-number').value = '';
+                document.getElementById('customer-name').value = '';
+                document.getElementById('outer-diameter').value = '';
+                document.getElementById('inner-bore').value = '';
+                document.getElementById('thickness').value = '';
+                document.getElementById('teeth-count').value = '';
+                document.getElementById('function-type').value = '';
+                document.getElementById('notes').value = '';
+
+                return true;
+            } catch (e) {
+                console.error("新增文件時發生錯誤: ", e);
+                return false;
+            }
+        }
+
+        // --- 3. 資料操作：更新維修進度 (已調整照片欄位抓取 Base64) ---
+        async function updateRepairItem(id, updateData) {
+            if (!isAuthReady || !getCollectionRef()) {
+                console.error("Firebase 尚未準備好或未登入");
+                modalMessage.textContent = '錯誤：系統尚未準備好。';
+                modalMessage.className = 'mt-3 text-sm text-red-500';
+                return false;
+            }
+
+            try {
+                const itemRef = doc(getCollectionRef(), id);
+                await updateDoc(itemRef, updateData);
+                modalMessage.textContent = '成功更新維修單狀態！';
+                modalMessage.className = 'mt-3 text-sm text-green-500';
+                setTimeout(() => modalOverlay.classList.remove('open'), 1000);
+                return true;
+            } catch (e) {
+                console.error("更新文件時發生錯誤: ", e);
+                modalMessage.textContent = `更新失敗: ${e.message}`;
+                modalMessage.className = 'mt-3 text-sm text-red-500';
+                return false;
+            }
+        }
+        
+        // --- 4. 資料監聽與 UI 渲染 (即時更新) (保持不變) ---
+        function setupDataListener() {
+            const itemsRef = getCollectionRef();
+            if (!itemsRef) return;
+
+            const q = query(itemsRef); 
+
+            onSnapshot(q, (querySnapshot) => {
+                const items = [];
+                querySnapshot.forEach((doc) => {
+                    items.push({
+                        id: doc.id,
+                        ...doc.data()
+                    });
+                });
+                
+                // 排序 (確保最新的在最上面)
+                items.sort((a, b) => {
+                    const tsA = a.timestamp?.seconds || 0;
+                    const tsB = b.timestamp?.seconds || 0;
+                    return tsB - tsA;
+                });
+
+                allItems = items;
+                itemCountEl.textContent = allItems.length;
+                
+                // 重新渲染當前模式的清單
+                if (currentMode === 'internal') {
+                    renderItems(allItems);
+                } else {
+                    // 客戶模式不自動渲染，需手動查詢
+                    itemsTableBody.innerHTML = `<tr><td colspan="7" class="px-6 py-4 text-sm text-gray-500 text-center">切換到公司內部視圖以查看所有清單。</td></tr>`;
+                }
+
+            }, (error) => {
+                console.error("監聽資料變動時發生錯誤: ", error);
+                itemsTableBody.innerHTML = `<tr><td colspan="7" class="px-6 py-4 text-center text-red-500">載入錯誤: ${error.message}</td></tr>`;
+            });
+        }
+
+        // 渲染維修項目清單 (內部視圖) (保持不變)
+        function renderItems(itemsToRender) {
+            itemsTableBody.innerHTML = '';
+            
+            if (itemsToRender.length === 0) {
+                 itemsTableBody.innerHTML = `<tr><td colspan="7" class="px-6 py-4 text-sm text-gray-500 text-center">目前沒有任何維修項目記錄。</td></tr>`;
+                return;
+            }
+
+            itemsToRender.forEach(item => {
+                const row = document.createElement('tr');
+                row.className = 'hover:bg-green-50 transition duration-150';
+                
+                const specText = `${item.outerDiameter || '-'} / ${item.innerBore || '-'} / ${item.thickness || '-'} / ${item.teethCount || '-'}`;
+                const statusColor = item.status === '出貨 (Shipped)' || item.status === '待取件 (Ready for Pickup)' || item.status === '待寄貨 (Ready for Mail)' ? 'bg-info text-white' : (item.status === STATUS_FLOW[0] ? 'bg-gray-200 text-gray-700' : 'bg-secondary text-gray-900');
+                const conditionalFlags = [];
+                if (item.isToothingRequired) conditionalFlags.push('<span class="text-warning font-semibold">補齒</span>');
+                if (item.isPlateCorrectionRequired) conditionalFlags.push('<span class="text-warning font-semibold">校正</span>');
+                
+                // 顯示狀態
+                const fullStatus = item.status.split(' (')[0] + (conditionalFlags.length > 0 ? ` (${conditionalFlags.join(', ')})` : '');
+
+                row.innerHTML = `
+                    <td class="px-3 py-4 text-sm text-gray-900">${item.customerName || '-'}</td>
+                    <td class="px-3 py-4 text-sm font-bold text-primary">${item.serialNumber || '-'}</td>
+                    <td class="px-3 py-4 text-sm text-gray-500">${item.quoteDate || '-'}</td>
+                    <td class="px-3 py-4 text-xs text-gray-700 font-mono">${specText}</td>
+                    <td class="px-3 py-4 text-sm text-gray-500">${item.functionType || '-'}</td>
+                    <td class="px-3 py-4 text-sm">
+                        <span class="status-pill ${statusColor}">
+                            ${item.status.split(' (')[0]}
+                        </span>
+                    </td>
+                    <td class="px-3 py-4 text-sm font-medium">
+                        <button class="text-info hover:text-blue-700 transition duration-150 mr-2" 
+                                onclick="window.showProgressModal('${item.id}')">
+                            更新進度
+                        </button>
+                        <button class="text-red-600 hover:text-red-900 transition duration-150" 
+                                onclick="window.deleteItemHandler('${item.id}', '${item.serialNumber}')">
+                            刪除
+                        </button>
+                    </td>
+                `;
+                itemsTableBody.appendChild(row);
+            });
+        }
+
+
+        // --- 5. 模態框與進度更新邏輯 (已調整照片欄位載入) ---
+        
+        // 尋找單一項目資料
+        function findItemById(id) {
+            return allItems.find(item => item.id === id);
+        }
+
+        // 顯示模態框
+        window.showProgressModal = (id) => {
+            const item = findItemById(id);
+            if (!item) return;
+
+            // 1. 清除舊的檔案選擇狀態和預覽
+            resetPhotoInputs();
+
+            // 2. 載入文字資料
+            modalItemId.value = item.id;
+            modalItemInfo.textContent = `${item.customerName} (${item.serialNumber})`;
+            modalStatusSelect.value = item.status;
+            modalToothing.checked = item.isToothingRequired || false;
+            modalPlateCorrection.checked = item.isPlateCorrectionRequired || false;
+            modalNotes.value = item.notes || '';
+            modalMessage.textContent = ''; // 清除舊訊息
+
+            // 3. 載入 Base64 數據到隱藏欄位並更新預覽
+            const photoBeforeData = item.photos?.before || '';
+            const photoAfterData = item.photos?.after || '';
+
+            modalBase64Before.value = photoBeforeData;
+            updatePreview(photoBeforeData, modalPreviewBefore, '維修前預覽圖');
+
+            modalBase64After.value = photoAfterData;
+            updatePreview(photoAfterData, modalPreviewAfter, '出貨前預覽圖');
+
+
+            modalOverlay.classList.add('open');
+        };
+
+        // 隱藏模態框
+        modalCloseBtn.addEventListener('click', () => {
+            modalOverlay.classList.remove('open');
+            resetPhotoInputs(); // 關閉時清空預覽，防止下次打開污染
+        });
+
+        // 提交模態框的更新
+        progressForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const id = modalItemId.value;
+            
+            // 從隱藏的 Base64 欄位中抓取數據
+            const updateData = {
+                status: modalStatusSelect.value,
+                isToothingRequired: modalToothing.checked,
+                isPlateCorrectionRequired: modalPlateCorrection.checked,
+                photos: {
+                    before: modalBase64Before.value, // Base64 數據
+                    after: modalBase64After.value   // Base64 數據
+                },
+                notes: modalNotes.value
+            };
+
+            await updateRepairItem(id, updateData);
+        });
+
+        // --- 6. 客戶查詢邏輯 (已調整圖片載入邏輯) ---
+
+        runCustomerSearchBtn.addEventListener('click', () => {
+            const serial = customerSerialSearch.value.trim();
+            const name = customerNameSearch.value.trim();
+            const date = customerDateSearch.value.trim();
+
+            customerSearchMessage.textContent = '';
+            customerResultContainer.classList.add('hidden');
+            
+            let resultItem = null;
+
+            // 優先以編號查詢 (不論大小寫)
+            if (serial) {
+                const serialLower = serial.toLowerCase();
+                resultItem = allItems.find(item => item.serialNumber && item.serialNumber.toLowerCase() === serialLower);
+            } else if (name && date) {
+                // 組合查詢: 客戶名稱 (不論大小寫) + 報價日期 (精確)
+                const nameLower = name.toLowerCase();
+                resultItem = allItems.find(item => 
+                    item.customerName && item.customerName.toLowerCase() === nameLower && 
+                    item.quoteDate === date
+                );
+            }
+            
+            if (resultItem) {
+                displayCustomerResult(resultItem);
+            } else {
+                customerSearchMessage.textContent = '找不到符合條件的維修單，請檢查您的輸入。';
+                customerSearchMessage.className = 'mt-4 text-base font-medium text-red-500 p-2 bg-red-100 rounded-lg';
+            }
+        });
+
+        function displayCustomerResult(item) {
+            customerSearchMessage.textContent = '';
+            customerResultContainer.classList.remove('hidden');
+            
+            // 標頭資訊
+            document.getElementById('customer-result-name').textContent = item.customerName;
+            document.getElementById('customer-result-serial').textContent = item.serialNumber;
+            
+            // --- 進度條邏輯 (保持不變) ---
+            
+            const currentStatusText = item.status.split(' (')[0];
+            const currentStatusIndex = STATUS_FLOW.findIndex(s => s === item.status);
+            
+            let progressHtml = '';
+            const stepCount = PROGRESS_STEPS.length;
+            const progressPercentage = Math.min(100, (currentStatusIndex / (stepCount - 1)) * 100);
+
+            // 1. 繪製進度條步驟
+            customerProgressDisplay.innerHTML = ''; // 清除舊的步驟
+            PROGRESS_STEPS.forEach((step, index) => {
+                let statusClass = 'step-pending';
+                let icon = index + 1; // 預設為數字
+                let label = step;
+                
+                if (index < currentStatusIndex) {
+                    statusClass = 'step-done';
+                    icon = '✓';
+                } else if (index === currentStatusIndex && index < stepCount) {
+                    statusClass = 'step-current';
+                    icon = '▶';
+                }
+
+                progressHtml += `
+                    <div class="progress-step ${statusClass}" style="width: ${100/stepCount}%;">
+                        <div class="step-indicator">${icon}</div>
+                        <div class="step-label">${label}</div>
+                    </div>
+                `;
+            });
+            
+            customerProgressDisplay.innerHTML = progressHtml;
+            progressBarFill.style.width = `${progressPercentage}%`;
+
+            // 2. 處理完成/出貨狀態 (在進度條下方獨立顯示)
+            // 由於每次會重新生成，先刪除舊的 finalStatusHtml (如果存在)
+            const oldFinalStatus = document.getElementById('final-status-display');
+            if (oldFinalStatus) oldFinalStatus.remove();
+
+            let finalStatusHtml = '';
+            if (currentStatusIndex >= 7) {
+                 const finalStatusText = FINAL_STEPS.find(s => item.status.includes(s));
+                 finalStatusHtml = `
+                    <div id="final-status-display" class="mt-6 p-4 bg-info text-white rounded-lg shadow-md flex items-center justify-center font-bold text-xl">
+                        📦 ${finalStatusText || '已完成'}：請準備收貨或取件
+                    </div>
+                 `;
+            } else {
+                // 顯示目前進度
+                finalStatusHtml = `
+                    <div id="final-status-display" class="mt-6 p-4 bg-primary/20 text-primary rounded-lg shadow-sm font-bold text-lg text-center">
+                        🏃 當前處理中：**${currentStatusText}**
+                    </div>
+                `;
+            }
+            customerResultContainer.querySelector('.relative.pt-1.mb-8').insertAdjacentHTML('beforeend', finalStatusHtml);
+
+
+            // 3. 處理特殊項目 (補齒/校正)
+            document.getElementById('toothing-status').innerHTML = `補齒: <span class="font-bold ${item.isToothingRequired ? 'text-warning' : 'text-gray-500'}">${item.isToothingRequired ? '是 (進行中)' : '否'}</span>`;
+            document.getElementById('correction-status').innerHTML = `鋼板校正: <span class="font-bold ${item.isPlateCorrectionRequired ? 'text-warning' : 'text-gray-500'}">${item.isPlateCorrectionRequired ? '是 (進行中)' : '否'}</span>`;
+
+
+            // 4. 處理照片 (調整為支援 Base64)
+            photoBeforeContainer.innerHTML = '';
+            photoAfterContainer.innerHTML = '';
+            photoPendingMessage.textContent = '';
+
+            const photoStyle = "w-full h-auto max-h-80 object-contain rounded-lg shadow-lg border-2 border-primary/50";
+            const photoBefore = item.photos?.before || '';
+            const photoAfter = item.photos?.after || '';
+
+            // 維修前照片
+            if (photoBefore) {
+                // 由於現在是 Base64 數據，不需要 onerror 處理 placeholder
+                photoBeforeContainer.innerHTML = `
+                    <h5 class="font-semibold text-primary mb-2">維修前照片</h5>
+                    <img src="${photoBefore}" class="${photoStyle}">
+                `;
+            } else {
+                 photoBeforeContainer.innerHTML = `<p class="text-gray-400 text-sm">維修前照片未提供。</p>`;
+            }
+
+            // 出貨前照片
+            if (photoAfter) {
+                photoAfterContainer.innerHTML = `
+                    <h5 class="font-semibold text-info mb-2 mt-4">出貨前照片 (已完成)</h5>
+                    <img src="${photoAfter}" class="${photoStyle}">
+                `;
+            } else if (currentStatusIndex >= 6) { // 檢查之後應該要有出貨照
+                 photoPendingMessage.textContent = '💡 出貨前照片尚未上傳，請稍候。';
+            } else {
+                 photoPendingMessage.textContent = '照片將在「檢查」階段後陸續上傳。';
+            }
+        }
+
+        // --- 7. 模式切換與通用事件處理 (保持不變) ---
+        
+        function setViewMode(mode) {
+            currentMode = mode;
+            if (mode === 'internal') {
+                modeInternalBtn.classList.replace('bg-white', 'bg-primary');
+                modeInternalBtn.classList.replace('text-primary', 'text-white');
+                modeCustomerBtn.classList.replace('bg-primary', 'bg-white');
+                modeCustomerBtn.classList.replace('text-white', 'text-primary');
+
+                addItemSection.classList.remove('hidden');
+                itemListSection.classList.remove('hidden');
+                customerSearchSection.classList.add('hidden');
+                renderItems(allItems); // 內部模式：顯示全部清單
+            } else {
+                modeInternalBtn.classList.replace('bg-primary', 'bg-white');
+                modeInternalBtn.classList.replace('text-white', 'text-primary');
+                modeCustomerBtn.classList.replace('bg-white', 'bg-primary');
+                modeCustomerBtn.classList.replace('text-primary', 'text-white');
+                
+                addItemSection.classList.add('hidden');
+                itemListSection.classList.add('hidden');
+                customerSearchSection.classList.remove('hidden');
+                itemsTableBody.innerHTML = `<tr><td colspan="7" class="px-6 py-4 text-sm text-gray-500 text-center">切換到公司內部視圖以查看所有清單。</td></tr>`;
+            }
+        }
+
+        modeInternalBtn.addEventListener('click', () => setViewMode('internal'));
+        modeCustomerBtn.addEventListener('click', () => setViewMode('customer'));
+
+
+        // 處理表單提交 (保持不變)
+        itemForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const serialNumber = document.getElementById('serial-number').value.trim();
+            const customerName = document.getElementById('customer-name').value.trim();
+            const quoteDate = document.getElementById('quote-date').value.trim();
+            const outerDiameter = document.getElementById('outer-diameter').value.trim();
+            const innerBore = document.getElementById('inner-bore').value.trim();
+            const thickness = document.getElementById('thickness').value.trim();
+            const teethCount = document.getElementById('teeth-count').value.trim();
+            const functionType = document.getElementById('function-type').value.trim();
+            const notes = document.getElementById('notes').value.trim();
+
+            if (serialNumber && customerName && quoteDate) {
+                submitButton.disabled = true;
+                submitButton.textContent = '新增中...';
+                
+                const repairData = {
+                    serialNumber, customerName, quoteDate, outerDiameter, innerBore,
+                    thickness, teethCount, functionType, notes
+                };
+
+                const success = await addRepairItem(repairData);
+                
+                const formMessageEl = document.getElementById('form-message');
+                if (success) {
+                    formMessageEl.textContent = `成功新增項目: ${customerName} (編號: ${serialNumber})`;
+                    formMessageEl.className = 'mt-3 text-sm text-green-500';
+                } else {
+                    formMessageEl.textContent = `新增失敗，請查看控制台錯誤。`;
+                    formMessageEl.className = 'mt-3 text-sm text-red-500';
+                }
+                setTimeout(() => formMessageEl.textContent = '', 3000);
+
+                submitButton.textContent = '新增維修項目';
+                submitButton.disabled = false;
+            }
+        });
+
+        // 處理查詢輸入 (內部模式) (保持不變)
+        searchInput.addEventListener('input', (e) => {
+            const searchTerm = e.target.value.toLowerCase().trim();
+            
+            if (searchTerm === '') {
+                renderItems(allItems);
+                return;
+            }
+
+            // 篩選邏輯：比對 客戶編號、客戶名稱、報價日期或任何規格
+            const filteredItems = allItems.filter(item => 
+                (item.customerName && item.customerName.toLowerCase().includes(searchTerm)) || 
+                (item.serialNumber && item.serialNumber.toLowerCase().includes(searchTerm)) ||
+                (item.quoteDate && item.quoteDate.includes(searchTerm)) ||
+                (item.outerDiameter && item.outerDiameter.toLowerCase().includes(searchTerm)) ||
+                (item.innerBore && item.innerBore.toLowerCase().includes(searchTerm)) ||
+                (item.thickness && item.thickness.toLowerCase().includes(searchTerm)) ||
+                (item.teethCount && item.teethCount.toLowerCase().includes(searchTerm)) ||
+                (item.functionType && item.functionType.toLowerCase().includes(searchTerm))
+            );
+
+            renderItems(filteredItems);
+        });
+
+        // 刪除函數 (保持不變)
+        window.deleteItemHandler = async (id, serialNumber) => {
+            if (!isAuthReady || !getCollectionRef()) {
+                console.error("Firebase 尚未準備好或未登入");
+                return;
+            }
+
+            // 使用原生的 confirm() 是不推薦的，但為了快速實現，我們將其視為內部操作
+            if (!window.confirm(`確定要刪除客戶編號為 ${serialNumber} (內部 ID: ${id}) 的項目嗎？`)) {
+                return;
+            }
+
+            try {
+                await deleteDoc(doc(getCollectionRef(), id));
+            } catch (e) {
+                console.error("刪除文件時發生錯誤: ", e);
+            }
+        };
+
+        // 自定義訊息顯示 (代替 alert)
+        function showCustomMessage(message, type = 'info') {
+            const tempMessageEl = document.createElement('div');
+            tempMessageEl.textContent = message;
+            tempMessageEl.className = `fixed top-4 right-4 p-4 rounded-lg shadow-xl text-white z-50 transition-all duration-300 ${type === 'error' ? 'bg-red-500' : 'bg-info'}`;
+            document.body.appendChild(tempMessageEl);
+            setTimeout(() => {
+                tempMessageEl.remove();
+            }, 4000);
+        }
+
+        // 初始化應用程式
+        window.onload = () => {
+            // 預設將報價日期設為今天
+            document.getElementById('quote-date').valueAsDate = new Date();
+            initializeFirebase();
+            setViewMode('internal'); // 預設為內部管理模式
+        }
+    </script>
+</body>
+</html>
